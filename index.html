@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>皮克敏畫布待辦清單</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;800&family=Noto+Sans+TC:wght@400;500;700&display=swap');
+
+        :root {
+            --bg-color: #e6f2eb;
+        }
+
+        body {
+            font-family: 'Nunito', 'Noto Sans TC', sans-serif;
+            background: linear-gradient(135deg, #e0f8e9 0%, #c1e8d5 50%, #dff2e3 100%);
+            overflow: hidden; /* 防止桌面版滾動 */
+            user-select: none; /* 防止意外選取文字 */
+        }
+
+        /* 畫布容器 */
+        #board {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            background-image: 
+                radial-gradient(circle at 20px 20px, rgba(255,255,255,0.4) 2px, transparent 0);
+            background-size: 40px 40px;
+        }
+
+        /* 玻璃擬態便利貼基礎樣式 */
+        .sticky-note {
+            position: absolute;
+            width: 240px;
+            height: 240px;
+            border-radius: 16px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            transition: transform 0.1s ease, box-shadow 0.2s ease, opacity 0.3s ease, filter 0.3s ease;
+            animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+
+        /* 拖曳時的視覺回饋 */
+        .sticky-note.dragging {
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.15);
+            transform: scale(1.03) rotate(2deg);
+            cursor: grabbing !important;
+            transition: transform 0.1s ease, box-shadow 0.1s ease;
+        }
+
+        /* 完成狀態 */
+        .sticky-note.completed {
+            opacity: 0.6;
+            filter: grayscale(60%);
+        }
+        .sticky-note.completed textarea {
+            text-decoration: line-through;
+            color: rgba(0, 0, 0, 0.5);
+        }
+
+        /* 頂部拖曳把手 */
+        .drag-handle {
+            cursor: grab;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px dashed rgba(0,0,0,0.1);
+        }
+        
+        .sticky-note.dragging .drag-handle {
+            cursor: grabbing;
+        }
+
+        /* 內容輸入區 */
+        textarea {
+            flex-grow: 1;
+            background: transparent;
+            border: none;
+            resize: none;
+            outline: none;
+            font-size: 1rem;
+            line-height: 1.5;
+            color: #333;
+            user-select: text;
+        }
+
+        textarea::placeholder {
+            color: rgba(0,0,0,0.3);
+        }
+
+        /* 自訂捲軸 */
+        textarea::-webkit-scrollbar { width: 6px; }
+        textarea::-webkit-scrollbar-track { background: transparent; }
+        textarea::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 4px; }
+
+        /* 動畫 */
+        @keyframes popIn {
+            0% { transform: scale(0.5) translateY(20px); opacity: 0; }
+            100% { transform: scale(1) translateY(0); opacity: 1; }
+        }
+        @keyframes fadeOut {
+            0% { transform: scale(1); opacity: 1; }
+            100% { transform: scale(0.8) translateY(-20px); opacity: 0; }
+        }
+
+        .is-removing {
+            animation: fadeOut 0.3s cubic-bezier(0.55, 0.085, 0.68, 0.53) forwards;
+        }
+
+        /* 手機與平板 RWD 適配 (Grid 模式) */
+        @media (max-width: 768px) {
+            body {
+                overflow: auto; /* 允許整體捲動 */
+            }
+            #board {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+                gap: 16px;
+                padding: 16px;
+                padding-bottom: 100px; /* 留白給新增按鈕 */
+                align-content: start;
+                height: 100vh;
+                overflow-y: auto;
+            }
+            /* 覆寫絕對定位，強制變成 Grid 元素 */
+            .sticky-note {
+                position: relative !important;
+                left: auto !important;
+                top: auto !important;
+                width: 100% !important;
+                height: 200px !important; /* 手機版稍微縮短 */
+                transform: none !important;
+            }
+            .sticky-note.dragging {
+                transform: none !important;
+                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08); /* 停用拖曳視覺 */
+            }
+            .drag-handle {
+                cursor: default; /* 停用滑鼠指標提示 */
+            }
+            #rwd-hint {
+                display: block !important;
+            }
+        }
+        
+        /* 皮克敏色系 (結合微毛玻璃背景) */
+        .color-red { background-color: rgba(255, 205, 210, 0.85); }     /* 小紅 */
+        .color-yellow { background-color: rgba(255, 245, 157, 0.85); }  /* 小黃 */
+        .color-blue { background-color: rgba(187, 222, 251, 0.85); }    /* 小藍 */
+        .color-purple { background-color: rgba(225, 190, 231, 0.85); }  /* 紫色 */
+        .color-white { background-color: rgba(245, 245, 245, 0.9); }    /* 白色 */
+        .color-pink { background-color: rgba(248, 187, 208, 0.85); }    /* 羽翅 */
+
+        /* UI 按鈕共用 */
+        .action-btn {
+            background: rgba(255, 255, 255, 0.5);
+            border: none;
+            border-radius: 50%;
+            width: 28px;
+            height: 28px;
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.85rem;
+        }
+        .action-btn:hover {
+            background: rgba(255, 255, 255, 0.9);
+            transform: scale(1.1);
+        }
+
+        /* 暗黑模式樣式 */
+        body.dark-mode {
+            background: linear-gradient(135deg, #121c17 0%, #080d0a 50%, #0d1410 100%);
+        }
+        body.dark-mode #board {
+            background-image: radial-gradient(circle at 20px 20px, rgba(255,255,255,0.05) 2px, transparent 0);
+        }
+        body.dark-mode .sticky-note {
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        }
+        body.dark-mode textarea {
+            color: #e0e0e0;
+        }
+        body.dark-mode textarea::placeholder {
+            color: rgba(255,255,255,0.3);
+        }
+        /* 針對暗黑模式調整稍微暗沈一點的玻璃色調 */
+        body.dark-mode .color-red { background-color: rgba(140, 50, 60, 0.75); }
+        body.dark-mode .color-yellow { background-color: rgba(140, 120, 40, 0.75); }
+        body.dark-mode .color-blue { background-color: rgba(40, 80, 140, 0.75); }
+        body.dark-mode .color-purple { background-color: rgba(100, 60, 140, 0.75); }
+        body.dark-mode .color-white { background-color: rgba(100, 100, 100, 0.75); }
+        body.dark-mode .color-pink { background-color: rgba(140, 70, 100, 0.75); }
+        
+        body.dark-mode .action-btn {
+            background: rgba(0, 0, 0, 0.3);
+            color: #ccc;
+        }
+        body.dark-mode .action-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            color: #fff;
+        }
+        body.dark-mode #add-btn {
+            background: rgba(30, 40, 35, 0.8);
+            color: #4ade80;
+            border-color: #2f4f3f;
+        }
+        body.dark-mode #add-btn:hover {
+            background: rgba(40, 55, 45, 1);
+        }
+        body.dark-mode #theme-toggle {
+            background: rgba(30, 40, 35, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+    </style>
+</head>
+<body>
+
+    <!-- 暗黑模式切換按鈕 -->
+    <button id="theme-toggle" class="fixed top-4 left-4 w-10 h-10 bg-white/50 backdrop-blur-md rounded-full shadow-md flex items-center justify-center text-xl z-50 hover:bg-white transition-all border border-gray-200 cursor-pointer" title="切換暗黑模式">
+        🌙
+    </button>
+
+    <!-- 畫布區域 -->
+    <div id="board">
+        <!-- RWD 提示字 (將位置移到中間避免與暗黑按鈕重疊) -->
+        <div id="rwd-hint" class="absolute top-4 left-1/2 -translate-x-1/2 text-green-800/50 font-bold hidden w-full text-center tracking-widest text-sm pointer-events-none z-0">
+            ~ 網格瀏覽模式 ~
+        </div>
+    </div>
+
+    <!-- 浮動新增按鈕 -->
+    <button id="add-btn" class="fixed bottom-8 right-8 w-16 h-16 bg-white/80 backdrop-blur-md rounded-full shadow-xl flex items-center justify-center text-3xl text-green-600 hover:bg-white hover:scale-110 hover:rotate-90 transition-all duration-300 z-50 border border-green-100">
+        +
+    </button>
+
+    <script>
+        // 皮克敏風格設定檔 (顏色與對應可能出現的植物圖示)
+        const pikminTypes = [
+            { color: 'color-red', icons: ['🌱', '🌿', '🌺'] },
+            { color: 'color-yellow', icons: ['🌱', '🌿', '🌼'] },
+            { color: 'color-blue', icons: ['🌱', '🌿', '🌸'] },
+            { color: 'color-purple', icons: ['🌱', '🌿', '🌷'] },
+            { color: 'color-white', icons: ['🌱', '🌿', '💮'] },
+            { color: 'color-pink', icons: ['🌱', '🌿', '🏵️'] }
+        ];
+
+        // 所有可選顏色與圖案 (用於使用者自訂切換)
+        const allColors = ['color-red', 'color-yellow', 'color-blue', 'color-purple', 'color-white', 'color-pink'];
+        const allIcons = ['🌱', '🌿', '🌺', '🌼', '🌸', '🌷', '💮', '🏵️', '🍄', '🍀'];
+
+        // 狀態管理
+        let notes = [];
+        let maxZIndex = 10;
+        const board = document.getElementById('board');
+        const addBtn = document.getElementById('add-btn');
+
+        // 拖曳狀態變數
+        let isDragging = false;
+        let currentDragElement = null;
+        let dragOffsetX = 0;
+        let dragOffsetY = 0;
+
+        // 初始化
+        function init() {
+            loadNotes();
+            setupEventListeners();
+        }
+
+        // 從 LocalStorage 載入資料
+        function loadNotes() {
+            const saved = localStorage.getItem('pikmin-notes');
+            if (saved) {
+                notes = JSON.parse(saved);
+                notes.forEach(noteData => {
+                    if (noteData.zIndex > maxZIndex) maxZIndex = noteData.zIndex;
+                    renderNote(noteData);
+                });
+            } else {
+                // 預設給一張教學便利貼
+                createNewNote(window.innerWidth / 2 - 120, window.innerHeight / 2 - 120, "歡迎來到皮克敏畫布！\n\n🌱 雙擊畫布新增便利貼\n🌱 自由拖曳移動位置\n🌱 點擊右側按鈕完成或刪除");
+            }
+        }
+
+        // 儲存至 LocalStorage
+        function saveNotes() {
+            localStorage.setItem('pikmin-notes', JSON.stringify(notes));
+        }
+
+        // 產生唯一的 ID
+        function generateId() {
+            return Date.now().toString(36) + Math.random().toString(36).substr(2);
+        }
+
+        // 隨機取得皮克敏風格
+        function getRandomPikminStyle() {
+            const type = pikminTypes[Math.floor(Math.random() * pikminTypes.length)];
+            const icon = type.icons[Math.floor(Math.random() * type.icons.length)];
+            return { colorClass: type.color, icon: icon };
+        }
+
+        // 建立新便利貼資料模型
+        function createNewNote(x, y, initialText = "") {
+            const style = getRandomPikminStyle();
+            
+            // 確保不會超出螢幕邊界
+            const safeX = Math.max(20, Math.min(x, window.innerWidth - 260));
+            const safeY = Math.max(20, Math.min(y, window.innerHeight - 260));
+
+            const newNote = {
+                id: generateId(),
+                text: initialText,
+                x: safeX,
+                y: safeY,
+                zIndex: ++maxZIndex,
+                colorClass: style.colorClass,
+                icon: style.icon,
+                completed: false
+            };
+            notes.push(newNote);
+            renderNote(newNote);
+            saveNotes();
+        }
+
+        // 渲染便利貼至 DOM
+        function renderNote(noteData) {
+            const noteEl = document.createElement('div');
+            noteEl.className = `sticky-note ${noteData.colorClass} ${noteData.completed ? 'completed' : ''}`;
+            noteEl.id = `note-${noteData.id}`;
+            noteEl.style.left = `${noteData.x}px`;
+            noteEl.style.top = `${noteData.y}px`;
+            noteEl.style.zIndex = noteData.zIndex;
+
+            noteEl.innerHTML = `
+                <div class="drag-handle" title="按住拖曳">
+                    <span class="note-icon text-xl drop-shadow-sm select-none cursor-pointer hover:scale-125 transition-transform" title="點擊更換圖案">${noteData.icon}</span>
+                    <div class="actions flex gap-1">
+                        <button class="action-btn color-btn" title="更換顏色">🎨</button>
+                        <button class="action-btn complete-btn" title="標記完成">✔️</button>
+                        <button class="action-btn delete-btn" title="刪除">❌</button>
+                    </div>
+                </div>
+                <textarea spellcheck="false" placeholder="在這裡輸入待辦事項...">${noteData.text}</textarea>
+            `;
+
+            // 事件綁定
+            const dragHandle = noteEl.querySelector('.drag-handle');
+            const textarea = noteEl.querySelector('textarea');
+            const completeBtn = noteEl.querySelector('.complete-btn');
+            const deleteBtn = noteEl.querySelector('.delete-btn');
+            const colorBtn = noteEl.querySelector('.color-btn');
+            const iconEl = noteEl.querySelector('.note-icon');
+
+            // 0. 切換圖案 (直接點擊左上角圖示)
+            iconEl.addEventListener('click', (e) => {
+                e.stopPropagation(); // 防止觸發置頂或拖曳
+                let currentIndex = allIcons.indexOf(noteData.icon);
+                let nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % allIcons.length;
+                noteData.icon = allIcons[nextIndex];
+                iconEl.innerText = noteData.icon;
+                saveNotes();
+            });
+
+            // 0.5 切換顏色 (點擊調色盤按鈕)
+            colorBtn.addEventListener('click', (e) => {
+                e.stopPropagation(); // 防止觸發置頂或拖曳
+                let currentIndex = allColors.indexOf(noteData.colorClass);
+                let nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % allColors.length;
+                noteEl.classList.remove(noteData.colorClass);
+                noteData.colorClass = allColors[nextIndex];
+                noteEl.classList.add(noteData.colorClass);
+                saveNotes();
+            });
+
+            // 1. 拖曳事件 (Mouse & Touch)
+            dragHandle.addEventListener('mousedown', (e) => startDrag(e, noteEl, noteData));
+            dragHandle.addEventListener('touchstart', (e) => startDrag(e, noteEl, noteData), { passive: false });
+
+            // 2. 文字輸入更新
+            textarea.addEventListener('input', (e) => {
+                noteData.text = e.target.value;
+                saveNotes();
+            });
+
+            // 3. 點擊便利貼時置頂
+            noteEl.addEventListener('mousedown', () => bringToFront(noteEl, noteData));
+            noteEl.addEventListener('touchstart', () => bringToFront(noteEl, noteData), { passive: true });
+
+            // 4. 完成按鈕
+            completeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                noteData.completed = !noteData.completed;
+                if(noteData.completed) {
+                    noteEl.classList.add('completed');
+                } else {
+                    noteEl.classList.remove('completed');
+                }
+                saveNotes();
+            });
+
+            // 5. 刪除按鈕
+            deleteBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                noteEl.classList.add('is-removing');
+                // 等待動畫結束後移除 DOM 與資料
+                setTimeout(() => {
+                    notes = notes.filter(n => n.id !== noteData.id);
+                    noteEl.remove();
+                    saveNotes();
+                }, 300);
+            });
+
+            board.appendChild(noteEl);
+        }
+
+        // 置頂功能
+        function bringToFront(noteEl, noteData) {
+            maxZIndex++;
+            noteEl.style.zIndex = maxZIndex;
+            noteData.zIndex = maxZIndex;
+            saveNotes();
+        }
+
+        // --- 拖曳邏輯 ---
+        function startDrag(e, noteEl, noteData) {
+            // 如果是在手機網格模式下，禁止拖曳 (根據 CSS 判斷或螢幕寬度)
+            if (window.innerWidth <= 768) return;
+            
+            // 避免點擊到按鈕也觸發拖曳
+            if(e.target.tagName.toLowerCase() === 'button' || e.target.closest('button')) return;
+
+            e.preventDefault(); // 防止反白
+            isDragging = true;
+            currentDragElement = { el: noteEl, data: noteData };
+            
+            bringToFront(noteEl, noteData);
+            noteEl.classList.add('dragging');
+
+            let clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
+            let clientY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
+
+            const rect = noteEl.getBoundingClientRect();
+            dragOffsetX = clientX - rect.left;
+            dragOffsetY = clientY - rect.top;
+        }
+
+        function onDrag(e) {
+            if (!isDragging || !currentDragElement) return;
+            if (window.innerWidth <= 768) return; // RWD 保險
+
+            let clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
+            let clientY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
+
+            // 計算新座標並防止完全拖出畫面
+            let newX = clientX - dragOffsetX;
+            let newY = clientY - dragOffsetY;
+
+            // 簡易邊界檢查 (保留至少一點在畫面內)
+            const maxX = window.innerWidth - 50;
+            const maxY = window.innerHeight - 50;
+            newX = Math.max(-100, Math.min(newX, maxX));
+            newY = Math.max(-50, Math.min(newY, maxY));
+
+            currentDragElement.el.style.left = `${newX}px`;
+            currentDragElement.el.style.top = `${newY}px`;
+        }
+
+        function endDrag(e) {
+            if (!isDragging || !currentDragElement) return;
+            
+            currentDragElement.el.classList.remove('dragging');
+            
+            // 儲存新位置
+            const newX = parseFloat(currentDragElement.el.style.left);
+            const newY = parseFloat(currentDragElement.el.style.top);
+            currentDragElement.data.x = newX;
+            currentDragElement.data.y = newY;
+            saveNotes();
+
+            isDragging = false;
+            currentDragElement = null;
+        }
+
+        // 設定全域事件監聽
+        function setupEventListeners() {
+            // 全域拖曳事件
+            document.addEventListener('mousemove', onDrag);
+            document.addEventListener('mouseup', endDrag);
+            document.addEventListener('touchmove', onDrag, { passive: false });
+            document.addEventListener('touchend', endDrag);
+
+            // 雙擊畫布新增便利貼 (排除點擊在便利貼上的情況)
+            board.addEventListener('dblclick', (e) => {
+                if (e.target === board) {
+                    createNewNote(e.clientX - 120, e.clientY - 40); // 稍微偏移讓滑鼠在把手附近
+                }
+            });
+
+            // 右下角新增按鈕
+            addBtn.addEventListener('click', () => {
+                // 隨機在畫面中央附近產生
+                const centerX = window.innerWidth / 2 - 120 + (Math.random() * 60 - 30);
+                const centerY = window.innerHeight / 2 - 120 + (Math.random() * 60 - 30);
+                
+                // 如果是手機模式，座標其實不會生效(被 CSS 覆寫)，但依然要存
+                createNewNote(centerX, centerY);
+                
+                // 手機版往下捲動到底部方便看到新卡片
+                if (window.innerWidth <= 768) {
+                    setTimeout(() => {
+                        board.scrollTo({ top: board.scrollHeight, behavior: 'smooth' });
+                    }, 100);
+                }
+            });
+
+            // 視窗大小改變時的簡單處理 (避免卡片跑到畫面外)
+            window.addEventListener('resize', () => {
+                if (window.innerWidth > 768) {
+                    notes.forEach(noteData => {
+                        const el = document.getElementById(`note-${noteData.id}`);
+                        if (el) {
+                            let adjusted = false;
+                            if (noteData.x > window.innerWidth - 100) { noteData.x = window.innerWidth - 240; adjusted = true; }
+                            if (noteData.y > window.innerHeight - 100) { noteData.y = window.innerHeight - 240; adjusted = true; }
+                            
+                            if (adjusted) {
+                                el.style.left = `${noteData.x}px`;
+                                el.style.top = `${noteData.y}px`;
+                            }
+                        }
+                    });
+                    saveNotes();
+                }
+            });
+        }
+
+        // 啟動應用程式
+        window.onload = () => {
+            initTheme();
+            init();
+        };
+
+        // --- 暗黑模式邏輯 ---
+        const themeToggle = document.getElementById('theme-toggle');
+        let isDarkMode = localStorage.getItem('pikmin-theme') === 'dark';
+
+        function initTheme() {
+            applyTheme();
+            themeToggle.addEventListener('click', () => {
+                isDarkMode = !isDarkMode;
+                localStorage.setItem('pikmin-theme', isDarkMode ? 'dark' : 'light');
+                applyTheme();
+            });
+        }
+
+        function applyTheme() {
+            if (isDarkMode) {
+                document.body.classList.add('dark-mode');
+                themeToggle.innerText = '☀️';
+            } else {
+                document.body.classList.remove('dark-mode');
+                themeToggle.innerText = '🌙';
+            }
+        }
+
+    </script>
+</body>
+</html>
